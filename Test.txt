@@ -1,0 +1,191 @@
+#include "cinder/app/App.h"
+#include "cinder/app/RendererGl.h"
+#include "cinder/gl/gl.h"
+#include "cinder/Timeline.h"
+#include "cinder/Rand.h"
+
+using namespace ci;
+using namespace ci::app;
+using namespace std;
+
+class Shader3App : public App {
+public:
+	void setup() override;
+	//void mouseDown(MouseEvent event) override;
+	void update() override;
+	void draw() override;
+
+	void  loadShader();
+
+	ci::gl::Texture2dRef    fromImage;
+	ci::gl::Texture2dRef    toImage;
+
+	ci::gl::GlslProgRef     shader;
+	ci::Anim<float>         time{ 0.0f };
+
+	int activeTex;
+	std::vector<gl::Texture2dRef> mImages;
+
+	void animate();
+	void loadImages(int);
+
+	double   mLastTime;
+};
+
+void Shader3App::setup()
+{
+	setFullScreen(true);
+
+
+
+
+
+	activeTex = 0;
+	for (int i = 1; i <= 10; ++i)
+	{
+		string img = std::to_string(i) + ".jpg";
+		auto texture = gl::Texture::create(loadImage(loadAsset(img)));
+		mImages.push_back(texture);
+	}
+
+	gl::enableAlphaBlending();
+	gl::enableDepth(false);
+
+	loadImages(activeTex);
+	loadShader();
+
+	//gl::ScopedTextureBind tex0(fromImage, 0);
+	//gl::ScopedTextureBind tex1(toImage, 1);
+	
+
+
+	app::timeline().apply(&time, 1.0f, randFloat(0.1, 4.0f), EaseInOutQuint());
+}
+
+void Shader3App::animate()
+{
+	if (time() > 0.5f)
+	{
+		app::timeline().apply(&time, 0.0f, 4.0f, EaseInOutQuint());
+	}
+	else
+	{
+		app::timeline().apply(&time, 1.0f, 4.0f, EaseInOutQuint());
+	}
+}
+
+void Shader3App::loadImages(int activeTex)
+{
+	
+	auto fmt = gl::Texture::Format().wrap(GL_REPEAT);
+	
+	if (activeTex == 0)
+	{
+		fromImage = mImages[activeTex];
+		toImage = mImages[activeTex + 1];
+	}
+	else
+	{
+	fromImage = mImages[activeTex - 1];
+		toImage = mImages[activeTex];
+	}
+
+	loadShader();
+}
+
+void Shader3App::loadShader()
+{
+	auto vertex = CI_GLSL(150,
+
+	uniform mat4 ciModelViewProjection;
+	in vec4 ciPosition;
+	in vec2 ciTexCoord0;
+
+	out vec2 UV;
+	out vec2 Position;
+
+	void main()
+	{
+		gl_Position = ciModelViewProjection * vec4(ciPosition.xy, 0, 1);
+
+		Position = ciPosition.xy;
+		UV = ciTexCoord0;
+	}
+
+	);
+
+	auto fragment = CI_GLSL(150,
+
+	in vec2 UV;
+	in vec2 Position;
+	out vec4 FinalColor;
+
+	uniform sampler2D from;
+	uniform sampler2D to;
+	uniform float progress;
+	uniform vec2 resolution;
+
+	// Custom parameters
+	uniform vec2 size;
+	uniform float smoothness;
+
+
+	float rand(vec2 co)
+	{
+		return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+	}
+
+	void main()
+	{
+		vec2 p = gl_FragCoord.xy / resolution.xy;
+		float r = rand(floor(vec2(size) * p));
+		float m = smoothstep(0.0, -smoothness, r - (progress * (1.0 + smoothness)));
+		gl_FragColor = mix(texture2D(from, p), texture2D(to, p), m);
+	}
+
+	);
+
+	shader = gl::GlslProg::create(vertex, fragment);
+	shader->uniform("from", 0);
+	shader->uniform("to", 1);
+	shader->uniform("size", 2);
+	shader->uniform("smoothness", 3);
+}
+
+
+
+void Shader3App::update()
+{
+	shader->uniform("progress", time());
+	shader->uniform("resolution", vec2(getWindowSize()));
+	shader->uniform("size", vec2(5, 5));
+	shader->uniform("smoothness", 0.5f);
+	double timeSinceLastImage = getElapsedSeconds() - mLastTime;
+	if (timeSinceLastImage > 3)
+	{
+		mLastTime = getElapsedSeconds();
+		animate();
+		
+		activeTex++;
+		if (activeTex == mImages.size())
+			activeTex = 0;
+		loadImages(activeTex);
+	}
+
+	
+	
+}
+
+void Shader3App::draw()
+{
+	gl::clear(Color(0, 0, 0));
+
+	gl::ScopedGlslProg shader(shader);
+
+	gl::ScopedTextureBind tex0(fromImage, 0);
+	gl::ScopedTextureBind tex1(toImage, 1);
+
+	gl::drawSolidRect(getWindowBounds());
+}
+
+CINDER_APP(Shader3App, RendererGl)
